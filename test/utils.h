@@ -6,6 +6,11 @@
 #include "pixman-private.h" /* For 'inline' definition */
 #include "utils-prng.h"
 
+#if defined(_MSC_VER)
+#define snprintf _snprintf
+#define strcasecmp _stricmp
+#endif
+
 #define ARRAY_LENGTH(A) ((int) (sizeof (A) / sizeof ((A) [0])))
 
 /* A primitive pseudorandom number generator,
@@ -63,6 +68,10 @@ uint32_t
 compute_crc32_for_image (uint32_t        in_crc32,
 			 pixman_image_t *image);
 
+/* Print the image in hexadecimal */
+void
+print_image (pixman_image_t *image);
+
 /* Returns TRUE if running on a little endian system
  */
 static force_inline pixman_bool_t
@@ -77,6 +86,17 @@ is_little_endian (void)
 void
 image_endian_swap (pixman_image_t *img);
 
+#if defined (HAVE_MPROTECT) && defined (HAVE_GETPAGESIZE) && \
+    defined (HAVE_SYS_MMAN_H) && defined (HAVE_MMAP)
+/* fence_malloc and friends have working fence implementation.
+ * Without this, fence_malloc still allocs but does not catch
+ * out-of-bounds accesses.
+ */
+#define FENCE_MALLOC_ACTIVE 1
+#else
+#define FENCE_MALLOC_ACTIVE 0
+#endif
+
 /* Allocate memory that is bounded by protected pages,
  * so that out-of-bounds access will cause segfaults
  */
@@ -86,9 +106,21 @@ fence_malloc (int64_t len);
 void
 fence_free (void *data);
 
+pixman_image_t *
+fence_image_create_bits (pixman_format_code_t format,
+                         int min_width,
+                         int height,
+                         pixman_bool_t stride_fence);
+
+/* Return the page size if FENCE_MALLOC_ACTIVE, or zero otherwise */
+unsigned long
+fence_get_page_size ();
+
 /* Generate n_bytes random bytes in fence_malloced memory */
 uint8_t *
 make_random_bytes (int n_bytes);
+float *
+make_random_floats (int n_bytes);
 
 /* Return current time in seconds */
 double
@@ -111,6 +143,7 @@ fail_after (int seconds, const char *msg);
 
 /* If possible, enable traps for floating point exceptions */
 void enable_divbyzero_exceptions(void);
+void enable_invalid_exceptions(void);
 
 /* Converts a8r8g8b8 pixels to pixels that
  *  - are not premultiplied,
@@ -177,6 +210,18 @@ convert_linear_to_srgb (double component);
 void
 initialize_palette (pixman_indexed_t *palette, uint32_t depth, int is_rgb);
 
+pixman_format_code_t
+format_from_string (const char *s);
+
+void
+list_formats (void);
+
+void
+list_operators (void);
+
+pixman_op_t
+operator_from_string (const char *s);
+
 const char *
 operator_name (pixman_op_t op);
 
@@ -187,6 +232,14 @@ typedef struct
 {
     double r, g, b, a;
 } color_t;
+
+void
+do_composite (pixman_op_t op,
+	      const color_t *src,
+	      const color_t *mask,
+	      const color_t *dst,
+	      color_t *result,
+	      pixman_bool_t component_alpha);
 
 void
 round_color (pixman_format_code_t format, color_t *color);
@@ -217,3 +270,14 @@ pixel_checker_get_min (const pixel_checker_t *checker, color_t *color,
 pixman_bool_t
 pixel_checker_check (const pixel_checker_t *checker,
 		     uint32_t pixel, color_t *color);
+
+void
+pixel_checker_convert_pixel_to_color (const pixel_checker_t *checker,
+                                      uint32_t pixel, color_t *color);
+
+void
+pixel_checker_get_masks (const pixel_checker_t *checker,
+                         uint32_t              *am,
+                         uint32_t              *rm,
+                         uint32_t              *gm,
+                         uint32_t              *bm);
